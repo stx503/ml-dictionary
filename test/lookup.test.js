@@ -55,6 +55,25 @@ const broken = makeStore({ getItem() { throw new Error("no"); }, setItem() { thr
 assert.deepStrictEqual(broken.getBookmarks(), []);
 assert.doesNotThrow(() => broken.addRecent("x"));
 
+// Google translate response parsing: main translation first, then dictionary alternatives
+const { parseGoogle } = require("../www/app.js");
+const sample = [
+  [["പുസ്തകം", "book", null, null, 10]],
+  [["noun", ["പുസ്തകം", "ഗ്രന്ഥം", "പുസ്തകം"], [["പുസ്തകം", ["book"], null, 0.5]], "book", 1],
+   ["verb", ["ബുക്ക് ചെയ്യുക", "റിസർവ് ചെയ്യുക", "മുൻകൂട്ടി ബുക്ക് ചെയ്യുക"], [], "book", 2]],
+  "en"
+];
+assert.deepStrictEqual(parseGoogle(sample), [
+  { text: "പുസ്തകം", pos: "noun" }, { text: "ഗ്രന്ഥം", pos: "noun" },
+  { text: "ബുക്ക് ചെയ്യുക", pos: "verb" }, { text: "റിസർവ് ചെയ്യുക", pos: "verb" },
+  { text: "മുൻകൂട്ടി ബുക്ക് ചെയ്യുക", pos: "verb" }
+]); // main translation first, types kept, no duplicates
+const many = [[["ഒന്ന്", "x"]], [["noun", Array.from({ length: 20 }, (_, i) => "അർത്ഥം" + "ം".repeat(i + 1)), [], "x", 1]], "en"];
+assert.strictEqual(parseGoogle(many).length, 10); // capped at 10 meanings
+assert.deepStrictEqual(parseGoogle([[["hello", "hello"]]]), []); // untranslated (no Malayalam) is rejected
+assert.deepStrictEqual(parseGoogle(null), []);
+assert.deepStrictEqual(parseGoogle({ error: true }), []);
+
 // Data integrity: every entry has Malayalam text, >=1 synonym, >=1 example with Malayalam translation
 const ML = /[ഀ-ൿ]/;
 for (const [word, [pos, ml, syn, ex]] of Object.entries(DICT)) {
@@ -63,5 +82,13 @@ for (const [word, [pos, ml, syn, ex]] of Object.entries(DICT)) {
   assert.ok(syn.length, word + ": no synonyms");
   assert.ok(ex.length && ex.every(([en, m]) => en && ML.test(m)), word + ": bad examples");
 }
+
+// Every built-in word has an English definition, and lookups carry type tags + definitions
+const DEFS = require("../www/defs.js");
+for (const word of Object.keys(DICT)) assert.ok(DEFS[word] && DEFS[word].length && DEFS[word][0][0], word + ": missing definition");
+for (const word of Object.keys(DEFS)) assert.ok(DICT[word], word + ": definition without a dictionary entry");
+const t = lookupLocal("teacher");
+assert.strictEqual(t.defs[0].pos, "noun");
+assert.strictEqual(t.mlPos.length, t.ml.length);
 
 console.log("All tests passed. Words stored offline:", Object.keys(DICT).length);
